@@ -1,17 +1,31 @@
-from fastapi import FastAPI, Depends, Request, Body
+from fastapi import FastAPI, Depends, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func
 from database import init_db, get_async_db, Product
 from parser import run_parser
-from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from threading import Event
+
 
 app = FastAPI()
 scheduler = AsyncIOScheduler()
 is_parsing = False
+active_connections = []
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    active_connections.append(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        active_connections.remove(websocket)
+
+async def notify_clients(message: str):
+    for connection in active_connections:
+        await connection.send_text(message)
 
 @app.on_event("startup")
 async def on_startup():
@@ -46,6 +60,7 @@ async def update_product(id: int, request: Request, db: AsyncSession = Depends(g
         db.add(product)
         await db.commit()
         await db.refresh(product)
+        await notify_clients(f"Обновлен товар: {product.id}, Название: {product.name}")
     except:
         return JSONResponse(status_code=400, content={"message": "Некорректный запрос"})
 
@@ -65,6 +80,7 @@ async def delete_product(id: int, db: AsyncSession = Depends(get_async_db)):
 
     await db.delete(product)
     await db.commit()
+    await notify_clients(f"Удален товар: {product.id}, Название: {product.name}")
     return {"result": "Товар удален успешно"}
 
 @app.post("/api/start-parser")
@@ -74,9 +90,10 @@ async def start_parser():
         is_parsing = True
         scheduler.add_job(run_parser, 'interval', minutes=5)
         scheduler.start()
-        return {"message": "Parser started."}
+        await notify_clients("Парсер запущен")
+        return {"message": "Парсер запущен"}
     else:
-        return {"message": "Parser is already running."}
+        return {"message": "Парсер уже работает"}
 
 @app.post("/api/stop-parser")
 async def stop_parser():
@@ -84,6 +101,7 @@ async def stop_parser():
     if is_parsing:
         is_parsing = False
         scheduler.remove_all_jobs()
-        return {"message": "Parser stopped."}
+        await notify_clients("Парсер остановлен")
+        return {"message": "Парсер остановлен"}
     else:
-        return {"message": "Parser is not running."}
+        return {"message": "Парсер не был запущен"}
