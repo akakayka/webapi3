@@ -56,7 +56,6 @@ async def fetch_and_save_products(session: AsyncSession, category: str, page: in
             )
 
             if response.status_code == 429:
-                print("Слишком много запросов. Подождите немного.")
                 return
 
             data = response.json()
@@ -70,7 +69,6 @@ async def fetch_and_save_products(session: AsyncSession, category: str, page: in
                 )
                 session.merge(new_product)
             await session.commit()
-            print(f"{len(products)} товаров добавлено в категорию '{category}'.")
         except Exception as e:
             print(f"Ошибка при запросе категории '{category}': {e}")
 

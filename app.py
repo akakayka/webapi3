@@ -13,7 +13,7 @@ scheduler = AsyncIOScheduler()
 is_parsing = False
 active_connections = []
 
-@app.websocket("/ws")
+@app.websocket("/api/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     active_connections.append(websocket)
@@ -44,6 +44,33 @@ async def get_product_by_id(id: int, db: AsyncSession = Depends(get_async_db)):
     if product is None:
         return JSONResponse(status_code=404, content={"message": "Товар не найден"})
     return product
+
+
+@app.post("/api/products")
+async def create_product(request: Request, db: AsyncSession = Depends(get_async_db)):
+    data = await request.json()
+    new_product = Product(
+        name=data["name"],
+        category=data["category"],
+        price=data["price"]
+    )
+
+
+    db.add(new_product)
+    await db.commit()
+    await db.refresh(new_product)
+
+    await notify_clients(f"Создан новый товар: {new_product.id}, Название: {new_product.name}")
+
+    return {
+        "message": "Товар успешно создан",
+        "product": {
+            "id": new_product.id,
+            "name": new_product.name,
+            "category": new_product.category,
+            "price": new_product.price
+        }
+    }
 
 @app.put("/api/products/{id}")
 async def update_product(id: int, request: Request, db: AsyncSession = Depends(get_async_db)):
@@ -88,7 +115,7 @@ async def start_parser():
     global is_parsing
     if not is_parsing:
         is_parsing = True
-        scheduler.add_job(run_parser, 'interval', minutes=5)
+        scheduler.add_job(run_parser, 'interval', minutes=1)
         scheduler.start()
         await notify_clients("Парсер запущен")
         return {"message": "Парсер запущен"}
